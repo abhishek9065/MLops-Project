@@ -90,7 +90,24 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     steps:
+      # The `secrets` context isn't allowed in a job-level `if`, so we gate with
+      # a step instead: if the droplet secrets aren't configured yet, skip the
+      # deploy cleanly rather than failing the whole pipeline. Once you add
+      # DROPLET_HOST / DROPLET_USER / DROPLET_SSH_KEY the deploy turns on.
+      - name: Check whether deploy secrets are configured
+        id: gate
+        env:
+          DROPLET_HOST: ${{ secrets.DROPLET_HOST }}
+        run: |
+          if [ -n "$DROPLET_HOST" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::DROPLET_HOST secret not set - skipping deploy step."
+          fi
+
       - name: Deploy to DigitalOcean over SSH
+        if: steps.gate.outputs.configured == 'true'
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.DROPLET_HOST }}
