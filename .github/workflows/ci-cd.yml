@@ -96,6 +96,9 @@ jobs:
       # DROPLET_HOST / DROPLET_USER / DROPLET_SSH_KEY the deploy turns on.
       - name: Check whether deploy secrets are configured
         id: gate
+        # This job does no checkout, so the workflow-level working-directory
+        # ("CX Curn Project") doesn't exist here -- override it.
+        working-directory: .
         env:
           DROPLET_HOST: ${{ secrets.DROPLET_HOST }}
         run: |
