@@ -255,6 +255,15 @@ pytest        # 12 tests: preprocessing, model loading, API endpoints
 Tests are **hermetic** — if no trained model exists (fresh CI checkout), a tiny
 model is trained to disk automatically. No network or MLflow server needed.
 
+To verify the **whole project** end-to-end (data → training → MLflow → API →
+Docker → drift → retraining), follow
+[`docs/verification_checklist.md`](docs/verification_checklist.md). For a quick
+automated check of a running API:
+
+```bash
+make smoke-test               # or: ./scripts/smoke_test.sh [URL]
+```
+
 ---
 
 ## CI/CD

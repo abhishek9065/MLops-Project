@@ -6,7 +6,7 @@
 .PHONY: setup data train mlflow-ui clean
 
 setup:            ## Install Python dependencies
-	pip install -r requirements.
+	pip install -r requirements.txt
 
 data:             ## Generate the synthetic churn dataset
 	python -m src.data.generate_dataset
@@ -25,6 +25,9 @@ serve:            ## Run the FastAPI app at http://localhost:8000 (docs at /docs
 
 test:             ## Run the pytest suite
 	pytest
+
+smoke-test:       ## Fire real requests at a RUNNING API (default localhost:8000)
+	./scripts/smoke_test.sh $(URL)
 
 docker-build:     ## Build the API image
 	docker build -t churn-api:latest .
