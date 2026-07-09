@@ -80,11 +80,38 @@ Open API docs:
 http://localhost:8000/docs
 ```
 
+If port `8000` is already used by another local project, run the API on `8001`:
+
+```bash
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
+```
+
+Then use:
+
+```text
+http://127.0.0.1:8001/docs
+http://127.0.0.1:8001/health
+```
+
 Start the Streamlit frontend in a second terminal:
 
 ```bash
 streamlit run frontend/streamlit_app.py --server.port 8501 --server.address 127.0.0.1 --server.headless true --browser.gatherUsageStats false
 ```
+
+In the Streamlit sidebar, set `API URL` to the backend port you are actually using:
+
+```text
+http://127.0.0.1:8000
+```
+
+or, if you started the API on `8001`:
+
+```text
+http://127.0.0.1:8001
+```
+
+Do not test the API with the bare root path `/`; this app does not define a homepage route. Use `/docs`, `/health`, or `/metrics`.
 
 ## Phase 1 API
 
@@ -597,6 +624,49 @@ That metadata becomes essential later when debugging bad answers, rolling back b
 - Rebuilding every document on every deployment instead of hashing and reindexing changed files.
 - Leaving old chunks in the index after source documents are deleted.
 - Publishing DigitalOcean service ports directly instead of routing through Nginx and firewall rules.
+- Opening `http://127.0.0.1:8000/` and assuming the API is broken when it returns `Not Found`; use `/docs` or `/health`.
+- Leaving another project running on port `8000`, then pointing Streamlit at the wrong backend. If upload returns `{"detail":"Not Found"}`, check that the API URL points to this RAGOps backend.
+
+## Local Troubleshooting
+
+Check which process owns API ports on Windows:
+
+```powershell
+Get-NetTCPConnection -LocalPort 8000,8001 -ErrorAction SilentlyContinue |
+  Select-Object LocalAddress,LocalPort,State,OwningProcess
+```
+
+Check whether the RAGOps backend is running:
+
+```powershell
+Invoke-RestMethod -Uri http://127.0.0.1:8001/health
+```
+
+Expected response:
+
+```text
+status: ok
+service: enterprise-ragops-platform
+version: 0.4.0-phase-8
+```
+
+If Streamlit upload shows:
+
+```json
+{"detail":"Not Found"}
+```
+
+then Streamlit is probably pointing at the wrong API. Update the sidebar `API URL` to:
+
+```text
+http://127.0.0.1:8001
+```
+
+Stop a running API process:
+
+```powershell
+Stop-Process -Id <PID>
+```
 
 ## Verification Checklist
 
