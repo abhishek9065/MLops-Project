@@ -259,11 +259,11 @@ model is trained to disk automatically. No network or MLflow server needed.
 
 ## CI/CD
 
-`.github/workflows/ci-cd.yml`, on every push/PR to `main`:
+`.github/workflows/ci-cd.yml`, on every push/PR to `master`:
 
 1. **test** — install deps + `pytest` (the quality gate).
-2. **build-and-push** *(push to main)* — build image, push to GHCR (SHA + `latest`).
-3. **deploy** *(push to main)* — SSH to the droplet, `docker compose pull && up -d`.
+2. **build-and-push** *(push to master)* — build image, push to GHCR (SHA + `latest`).
+3. **deploy** *(push to master)* — SSH to the droplet, `docker compose pull && up -d`.
 
 Set secrets safely per [`docs/github_secrets.md`](docs/github_secrets.md):
 `DROPLET_HOST`, `DROPLET_USER`, `DROPLET_SSH_KEY`, `GHCR_USER`, `GHCR_PAT`.

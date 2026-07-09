@@ -1,13 +1,13 @@
 name: CI/CD
 
 # WHEN this runs:
-#  - every push to main  -> full pipeline (test -> build -> deploy)
+#  - every push to master -> full pipeline (test -> build -> deploy)
 #  - every pull request  -> tests only (never deploys unreviewed code)
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -31,11 +31,11 @@ jobs:
         run: pytest
 
   # ---------------------------------------------------------------------------
-  # 2) BUILD & PUSH: only on push to main. Publishes the image to GHCR.
+  # 2) BUILD & PUSH: only on push to master. Publishes the image to GHCR.
   # ---------------------------------------------------------------------------
   build-and-push:
     needs: test                          # runs only if `test` passed
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -74,7 +74,7 @@ jobs:
   # ---------------------------------------------------------------------------
   deploy:
     needs: build-and-push
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to DigitalOcean over SSH

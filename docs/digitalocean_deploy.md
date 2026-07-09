@@ -102,7 +102,7 @@ is now on `https://your-domain.com/`.
 ## After the first deploy: CI does it for you
 
 Once `DROPLET_HOST`, `DROPLET_USER`, `DROPLET_SSH_KEY`, `GHCR_USER`, `GHCR_PAT`
-are set as GitHub secrets (see `github_secrets.md`), every push to `main` will
+are set as GitHub secrets (see `github_secrets.md`), every push to `master` will
 test → build → push → SSH in → `docker compose pull && up -d`. Zero manual steps.
 
 ## Common mistakes
