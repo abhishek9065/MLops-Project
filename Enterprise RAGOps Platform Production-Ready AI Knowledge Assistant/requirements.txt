@@ -7,4 +7,4 @@ streamlit==1.46.1
 requests==2.32.4
 pytest==8.4.1
 httpx==0.28.1
-
+prometheus-client==0.22.1

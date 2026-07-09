@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import math
+import hashlib
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,6 +28,7 @@ class StoredDocument:
     chunk_count: int
     created_at: str
     updated_at: str
+    active: bool = True
 
 
 @dataclass(frozen=True)
@@ -53,7 +56,8 @@ class LocalHashEmbeddingModel:
             token = "".join(ch for ch in raw_token if ch.isalnum())
             if not token:
                 continue
-            bucket = hash(token) % self.dimensions
+            digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+            bucket = int(digest[:8], 16) % self.dimensions
             vector[bucket] += 1.0
 
         norm = math.sqrt(sum(value * value for value in vector))
@@ -69,10 +73,15 @@ class SQLiteVectorStore:
         self.embedding_model = LocalHashEmbeddingModel()
         self._init_db()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            yield connection
+            connection.commit()
+        finally:
+            connection.close()
 
     def _init_db(self) -> None:
         with self._connect() as connection:
@@ -86,7 +95,8 @@ class SQLiteVectorStore:
                     document_version INTEGER NOT NULL,
                     chunk_count INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    active INTEGER NOT NULL DEFAULT 1
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_documents_filename
@@ -109,6 +119,15 @@ class SQLiteVectorStore:
                 CREATE INDEX IF NOT EXISTS idx_chunks_document_id
                 ON chunks(document_id);
                 """
+            )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(documents)").fetchall()
+            }
+            if "active" not in columns:
+                connection.execute("ALTER TABLE documents ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_documents_active ON documents(active)"
             )
 
     def upsert_document(self, document: LoadedDocument, chunks: list[TextChunk]) -> tuple[StoredDocument, list[StoredChunk]]:
@@ -138,14 +157,15 @@ class SQLiteVectorStore:
             document_id = str(uuid.uuid4())
             document_version = int(existing["document_version"]) + 1 if existing else 1
             created_at = existing["created_at"] if existing else now
+            connection.execute("UPDATE documents SET active = 0 WHERE filename = ?", (document.filename,))
 
             connection.execute(
                 """
                 INSERT INTO documents (
                     document_id, filename, content_type, sha256,
-                    document_version, chunk_count, created_at, updated_at
+                    document_version, chunk_count, created_at, updated_at, active
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     document_id,
@@ -156,6 +176,7 @@ class SQLiteVectorStore:
                     len(chunks),
                     created_at,
                     now,
+                    1,
                 ),
             )
 
@@ -214,9 +235,56 @@ class SQLiteVectorStore:
     def list_documents(self) -> list[StoredDocument]:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM documents ORDER BY updated_at DESC, filename ASC"
+                "SELECT * FROM documents WHERE active = 1 ORDER BY updated_at DESC, filename ASC"
             ).fetchall()
         return [self._row_to_document(row) for row in rows]
+
+    def list_all_documents(self) -> list[StoredDocument]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM documents ORDER BY filename ASC, document_version DESC"
+            ).fetchall()
+        return [self._row_to_document(row) for row in rows]
+
+    def get_latest_document_by_filename(self, filename: str) -> StoredDocument | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM documents
+                WHERE filename = ?
+                ORDER BY document_version DESC
+                LIMIT 1
+                """,
+                (filename,),
+            ).fetchone()
+        return self._row_to_document(row) if row else None
+
+    def delete_documents_not_in(self, filenames: set[str]) -> int:
+        placeholders = ",".join("?" for _ in filenames)
+        with self._connect() as connection:
+            if filenames:
+                rows = connection.execute(
+                    f"SELECT document_id FROM documents WHERE filename NOT IN ({placeholders})",
+                    tuple(filenames),
+                ).fetchall()
+            else:
+                rows = connection.execute("SELECT document_id FROM documents").fetchall()
+
+            document_ids = [row["document_id"] for row in rows]
+            for document_id in document_ids:
+                connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
+                connection.execute("DELETE FROM documents WHERE document_id = ?", (document_id,))
+        return len(document_ids)
+
+    def delete_inactive_document_versions(self) -> int:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT document_id FROM documents WHERE active = 0").fetchall()
+            document_ids = [row["document_id"] for row in rows]
+            for document_id in document_ids:
+                connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
+                connection.execute("DELETE FROM documents WHERE document_id = ?", (document_id,))
+        return len(document_ids)
 
     def search(self, query: str, top_k: int = 4) -> list[StoredChunk]:
         query_embedding = self.embedding_model.embed(query)
@@ -226,6 +294,7 @@ class SQLiteVectorStore:
                 SELECT c.*, d.filename
                 FROM chunks c
                 JOIN documents d ON d.document_id = c.document_id
+                WHERE d.active = 1
                 """
             ).fetchall()
 
@@ -286,6 +355,7 @@ class SQLiteVectorStore:
             chunk_count=row["chunk_count"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            active=bool(row["active"]),
         )
 
 
@@ -293,4 +363,3 @@ def cosine_similarity(left: list[float], right: list[float]) -> float:
     if len(left) != len(right):
         raise ValueError("Vectors must have the same dimensions.")
     return sum(a * b for a, b in zip(left, right, strict=True))
-

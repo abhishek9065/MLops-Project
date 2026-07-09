@@ -1,4 +1,4 @@
-name: phase-1-ci
+name: enterprise-ragops-ci
 
 on:
   push:
@@ -17,4 +17,33 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run tests
         run: pytest -q
+      - name: Run RAG evaluation gate
+        run: python -m scripts.run_evaluation --threshold 0.65
+      - name: Run retrieval quality gate
+        run: python -m scripts.test_retrieval_quality --threshold 0.75
+      - name: Validate Docker Compose
+        run: docker compose config
+      - name: Build Docker image
+        run: docker compose build api frontend
 
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.ENABLE_DROPLET_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "${{ secrets.DO_HOST }}" >> ~/.ssh/known_hosts
+      - name: Deploy to DigitalOcean Droplet
+        run: |
+          ssh "${{ secrets.DO_USER }}@${{ secrets.DO_HOST }}" << 'EOF'
+            set -euo pipefail
+            cd ~/enterprise-ragops-platform
+            git pull --ff-only
+            test -f .env || cp .env.example .env
+            docker compose up -d --build
+            docker compose ps
+          EOF
