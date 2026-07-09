@@ -1,0 +1,83 @@
+# Production compose file used ON THE DROPLET.
+# Difference from docker-compose.yml: instead of BUILDING the image, we PULL a
+# prebuilt image that CI already tested and pushed to GHCR. The droplet never
+# compiles code -- it just runs a known-good artifact.
+#
+# Set API_IMAGE before running, e.g.:
+#   export API_IMAGE=ghcr.io/<you>/mlops-churn-prediction:latest
+
+services:
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.16.2
+    container_name: churn-mlflow
+    command: >
+      mlflow server
+      --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --artifacts-destination /mlflow/artifacts
+      --serve-artifacts
+    volumes:
+      - mlflow_data:/mlflow
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  trainer:
+    image: ${API_IMAGE:-ghcr.io/CHANGE_ME/mlops-churn-prediction:latest}
+    container_name: churn-trainer
+    command: ["sh", "-c", "python -m src.data.generate_dataset && python -m src.training.train"]
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      REGISTERED_MODEL_NAME: churn-classifier
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: ${API_IMAGE:-ghcr.io/CHANGE_ME/mlops-churn-prediction:latest}
+    container_name: churn-api
+    ports:
+      - "8000:8000"
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      REGISTERED_MODEL_NAME: churn-classifier
+    depends_on:
+      mlflow:
+        condition: service_healthy
+      trainer:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: churn-prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: churn-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  mlflow_data:
+  prometheus_data:
+  grafana_data:

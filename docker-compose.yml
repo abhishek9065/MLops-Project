@@ -1,0 +1,90 @@
+# docker-compose orchestrates the whole local stack with ONE command:
+#   docker compose up --build
+#
+# Services & startup order (enforced by depends_on + health/completion gates):
+#   1. mlflow  -> MLflow tracking server (SQLite backend, serves artifacts)
+#   2. trainer -> one-shot: generate data + train + register model, then exits
+#   3. api     -> FastAPI, loads the Production model from mlflow, serves traffic
+#
+# We start with SQLite (easiest). Phase 8 adds Prometheus + Grafana; a later
+# option swaps SQLite for PostgreSQL.
+
+services:
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.16.2
+    container_name: churn-mlflow
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --artifacts-destination /mlflow/artifacts
+      --serve-artifacts
+    ports:
+      - "5000:5000"          # MLflow UI at http://localhost:5000
+    volumes:
+      - mlflow_data:/mlflow  # persists the DB + artifacts across restarts
+    healthcheck:
+      # The mlflow image ships Python; use it (no curl needed) to probe /health.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  trainer:
+    build: .
+    container_name: churn-trainer
+    command: ["sh", "-c", "python -m src.data.generate_dataset && python -m src.training.train"]
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      REGISTERED_MODEL_NAME: churn-classifier
+    depends_on:
+      mlflow:
+        condition: service_healthy   # don't train until the server is ready
+    restart: "no"                    # one-shot job; it runs once and exits
+
+  api:
+    build: .
+    container_name: churn-api
+    ports:
+      - "8000:8000"                  # API at http://localhost:8000/docs
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      REGISTERED_MODEL_NAME: churn-classifier
+    depends_on:
+      mlflow:
+        condition: service_healthy
+      trainer:
+        condition: service_completed_successfully  # wait until a model exists
+    restart: unless-stopped
+
+  # --- Monitoring (Phase 8) ---
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: churn-prometheus
+    ports:
+      - "9090:9090"                  # Prometheus UI at http://localhost:9090
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - api
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: churn-grafana
+    ports:
+      - "3000:3000"                  # Grafana at http://localhost:3000 (admin/admin)
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+volumes:
+  mlflow_data:
+  prometheus_data:
+  grafana_data:

@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment variables (never commit secrets)
+.env
+
+# Data artifacts (keep the folders, ignore the big files)
+data/raw/*.csv
+data/processed/*.csv
+data/processed/*.parquet
+
+# Model artifacts
+models/*.pkl
+models/*.joblib
+models/*.json
+
+# MLflow local store
+mlruns/
+mlartifacts/
+mlflow.db
+
+# Generated drift reports
+reports/*.json
+reports/*.html
+
+# Notebooks checkpoints
+.ipynb_checkpoints/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Claude Code local settings
+.claude/
