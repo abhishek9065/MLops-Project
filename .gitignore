@@ -1,8 +1,0 @@
-# Root ignores for the monorepo. Each project also has its own .gitignore.
-.claude/
-.venv/
-venv/
-__pycache__/
-*.py[cod]
-.env
-.DS_Store
